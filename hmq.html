@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>উচ্চতর গণিত </title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, 'Hind Siliguri', sans-serif; 
+            background: #f0f2f5; margin: 0; padding: 15px; 
+        }
+        h2 { text-align: center; color: #2e7d32; margin-bottom: 5px; }
+        #msg { text-align: center; color: #666; margin-bottom: 15px; font-size: 14px; font-weight: bold; }
+
+        .chapter-container { margin-bottom: 20px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .chapter-header { background: #2e7d32; color: white; padding: 12px 18px; font-weight: bold; font-size: 18px; border-left: 5px solid #1b5e20; }
+
+        .button-list { display: flex; flex-direction: column; padding: 10px; gap: 8px; }
+
+        .html-button {
+            background: #fff; border: 1px solid #e0e0e0; color: #333; padding: 14px; 
+            border-radius: 8px; font-size: 16px; cursor: pointer; text-align: left;
+            display: flex; justify-content: space-between; align-items: center;
+            transition: 0.2s;
+        }
+        .html-button:active { background: #e8f5e9; transform: translateY(2px); }
+
+        .status-tag { font-size: 11px; padding: 4px 8px; border-radius: 6px; background: #f1f1f1; color: #888; }
+        .saved { background: #d4edda; color: #155724; font-weight: bold; }
+
+        /* Viewer Overlay */
+        #viewerOverlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #fff; z-index: 9999; flex-direction: column; }
+        #toolbar { background: #1b5e20; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+        #content-holder { flex: 1; overflow: auto; }
+        iframe { width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+
+    <h2>উচ্চতর গণিত </h2>
+    <div id="msg">ডাটাবেস লোড হচ্ছে...</div>
+    <div id="mainContainer"></div>
+
+    <div id="viewerOverlay">
+        <div id="toolbar">
+            <span id="file-title">লোড হচ্ছে...</span>
+            <button onclick="closeViewer()" style="background:#ff4757; color:white; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-weight: bold;">বন্ধ করুন</button>
+        </div>
+        <div id="content-holder"></div>
+    </div>
+
+    <script>
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyj4uKE_78hNR-ZGixB7_MJ5N5alAnOWvtkYz3WTYulHT3bmC-qI0_Vn5nObrPPP9o/exec"; 
+
+        let db;
+        // ডাটাবেস ওপেন করা
+        const request = indexedDB.open("Class8ScienceLib", 1);
+
+        request.onupgradeneeded = e => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains("html_files")) {
+                db.createObjectStore("html_files", { keyPath: "id" });
+            }
+        };
+
+        request.onsuccess = e => {
+            db = e.target.result;
+            syncContent();
+        };
+
+        async function syncContent() {
+            try {
+                const res = await fetch(SCRIPT_URL);
+                const files = await res.json();
+                renderChapters(files);
+            } catch (e) {
+                // অফলাইন মোড
+                const tx = db.transaction("html_files", "readonly");
+                tx.objectStore("html_files").getAll().onsuccess = (e) => renderChapters(e.target.result, true);
+            }
+        }
+
+        async function renderChapters(files, isOffline = false) {
+            const container = document.getElementById('mainContainer');
+            container.innerHTML = "";
+            document.getElementById('msg').innerText = isOffline ? "অফলাইন মোড (সংরক্ষিত ফাইল)" : "অনলাইন মোড (সব ফাইল)";
+
+            const chapters = {};
+            let hasFiles = false;
+
+            files.forEach(f => {
+                // ফিল্টার: শুরুতে সংখ্যা (\d+), তারপর স্পেস (\s*), তারপর '৮ম'
+                const match = f.name.match(/^(\d+)\s*উচ্চতর গণিত/); 
+                
+                if (match) {
+                    hasFiles = true;
+                    const chNum = match[1];
+                    const chName = "অধ্যায়: " + chNum;
+                    if (!chapters[chName]) chapters[chName] = [];
+                    chapters[chName].push(f);
+                }
+            });
+
+            if (!hasFiles) {
+                container.innerHTML = "<p style='text-align:center; color:#666; padding: 20px;'>কোনো ফাইল খুঁজে পাওয়া যায়নি!</p>";
+                document.getElementById('msg').innerText = "ফাইল পাওয়া যায়নি";
+                return;
+            }
+
+            for (const ch in chapters) {
+                const section = document.createElement('div');
+                section.className = 'chapter-container';
+                section.innerHTML = `<div class="chapter-header">${ch}</div>`;
+
+                const list = document.createElement('div');
+                list.className = 'button-list';
+
+                for (const f of chapters[ch]) {
+                    const saved = await getFromDB(f.id);
+                    const displayName = f.name.replace(/\.[^/.]+$/, ""); 
+
+                    const btn = document.createElement('button');
+                    btn.className = 'html-button';
+                    btn.innerHTML = `<span><i class="fas fa-file-code" style="color:#2e7d32; margin-right:8px;"></i> ${displayName}</span> 
+                                     <span id="tag-${f.id}" class="status-tag ${saved ? 'saved' : ''}">${saved ? 'ফোনে আছে' : 'ডাউনলোড'}</span>`;
+                    btn.onclick = () => handleFile(f);
+                    list.appendChild(btn);
+                }
+                section.appendChild(list);
+                container.appendChild(section);
+            }
+        }
+
+        async function handleFile(file) {
+            const saved = await getFromDB(file.id);
+            const cleanTitle = file.name.replace(/\.[^/.]+$/, "");
+
+            if (saved) {
+                openHTML(saved.data, cleanTitle);
+            } else {
+                const tag = document.getElementById(`tag-${file.id}`);
+                tag.innerText = "লোডিং...";
+                try {
+                    const res = await fetch(`${SCRIPT_URL}?fileId=${file.id}`);
+                    if (!res.ok) throw new Error();
+                    const b64 = await res.text();
+                    
+                    await saveToDB(file.id, file.name, b64);
+                    
+                    tag.innerText = "ফোনে আছে";
+                    tag.classList.add('saved');
+                    openHTML(b64, cleanTitle);
+                } catch (e) { 
+                    alert("ডাউনলোড করতে ব্যর্থ! ইন্টারনেট চেক করুন।"); 
+                    tag.innerText = "ডাউনলোড";
+                }
+            }
+        }
+
+        function saveToDB(id, name, data) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction("html_files", "readwrite");
+                const store = tx.objectStore("html_files");
+                const req = store.put({ id, name, data });
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject();
+            });
+        }
+
+        function getFromDB(id) {
+            return new Promise(r => {
+                if (!db) return r(null);
+                const tx = db.transaction("html_files", "readonly");
+                const req = tx.objectStore("html_files").get(id);
+                req.onsuccess = () => r(req.result);
+                req.onerror = () => r(null);
+            });
+        }
+
+        function openHTML(base64, cleanTitle) {
+            document.getElementById('viewerOverlay').style.display = 'flex';
+            document.getElementById('file-title').innerText = cleanTitle;
+            const holder = document.getElementById('content-holder');
+            
+            try {
+                // UTF-8 সাপোর্টসহ ডিকোড
+                const htmlContent = decodeURIComponent(escape(atob(base64)));
+                holder.innerHTML = `<iframe id="viewer"></iframe>`;
+                const iframe = document.getElementById('viewer');
+                const doc = iframe.contentWindow.document;
+                doc.open();
+                doc.write(htmlContent);
+                doc.close();
+            } catch (e) {
+                alert("ফাইলটি প্রসেস করতে সমস্যা হয়েছে!");
+            }
+        }
+
+        function closeViewer() {
+            document.getElementById('viewerOverlay').style.display = 'none';
+            document.getElementById('content-holder').innerHTML = "";
+        }
+    </script>
+</body>
+</html>
